@@ -28,13 +28,13 @@ const char *APP_NAME = "Tomayto";
 const int SCREEN_WIDTH = 600;
 const int SCREEN_HEIGHT = 380;
 
-// const float WORK_DUR = 25 * 60;       // 25 minutes, work
-// const float SHORT_BREAK_DUR = 5 * 60; // 5  minutes, short break
-// const float LONG_BREAK_DUR = 15 * 60; // 15 minutes, short break
+const float WORK_DUR = 25 * 60;       // 25 minutes, work
+const float SHORT_BREAK_DUR = 5 * 60; // 5  minutes, short break
+const float LONG_BREAK_DUR = 15 * 60; // 15 minutes, short break
 // short testing values:
-const float WORK_DUR = 20;       // 25 minutes, work
-const float SHORT_BREAK_DUR = 5; // 5  minutes, short break
-const float LONG_BREAK_DUR = 15; // 15 minutes, short break
+// const float WORK_DUR = 20;       // 25 minutes, work
+// const float SHORT_BREAK_DUR = 5; // 5  minutes, short break
+// const float LONG_BREAK_DUR = 15; // 15 minutes, short break
 
 // non-const globals.
 // i figured that these are, in fact, just things that the whole application should know about.
@@ -44,7 +44,7 @@ int pomodoro_nr = 1;
 Phase phase = WORK;
 Color ACCENT = MAY_ORANGE; // non-const as the accent color changes with phase
 
-void draw_header(Phase phase, int pomodoro_nr);
+void draw_header();
 int update_time_on_disk(int increment = WORK_DUR);
 
 class Button {
@@ -123,6 +123,8 @@ class Button {
         }
     }
 
+    void set_body_color(Color new_color) { this->body_color = new_color; }
+
     static void draw_buttons() {
         for (auto btn : buttons) {
             btn->draw();
@@ -130,8 +132,7 @@ class Button {
     }
 
     void set_text(const char *text) { this->text = text; }
-    void set_body_color(Color body_color) { this->body_color = body_color; }
-    bool is_pressed() { return pressed; }
+    bool just_pressed() { return pressed; }
 
     Button(Rectangle rect, Color body_color, string text, int font_size, Color text_color,
            int key_equiv)
@@ -143,17 +144,49 @@ class Button {
 
 class Timer {
   private:
+    const float durations[3] = {WORK_DUR, SHORT_BREAK, LONG_BREAK};
     float timer = WORK_DUR;
-    bool paused = true;
+    bool is_paused_ = true;
 
-    bool phase_changed = false;
+    bool pause_just_changed_ = false;
+    bool phase_just_changed_ = false;
     bool time_ran_out_ = false;
 
     // if 'forward' is true, skip the phase forward,
     // if false, skip backwards
     void change_phase(bool forward) {
-        phase_changed = true;
-        paused = true;
+        is_paused_ = true;
+        phase_just_changed_ = true;
+        pause_just_changed_ = true;
+
+        // these are what i'm calling "song skip mechanics". if you're in a phase, say halfway
+        // through, and skip back, you'll first skip to the beginning of that phase.
+        /*
+        if (!forward) {
+            switch (phase) {
+            case WORK:
+                if (WORK_DUR - ceil(timer) > 5) {
+
+                } else {
+                }
+                break;
+            case SHORT_BREAK:
+                if (SHORT_BREAK_DUR - ceil(timer) > 5) {
+
+                } else {
+                }
+                break;
+            case LONG_BREAK:
+                if (LONG_BREAK_DUR - ceil(timer) > 5) {
+
+                } else {
+                }
+                break;
+            }
+            if (phase == WORK && (WORK_DUR - ceil(timer) < 5)) {
+            }
+        }
+        */
 
         if (phase == WORK) {
 
@@ -163,15 +196,15 @@ class Timer {
 
             if ((pomodoro_nr % 4) == 0) {
                 phase = LONG_BREAK;
-                timer = LONG_BREAK_DUR;
+                timer = durations[LONG_BREAK];
             } else {
                 phase = SHORT_BREAK;
-                timer = SHORT_BREAK_DUR;
+                timer = durations[SHORT_BREAK];
             }
 
         } else {
             phase = WORK;
-            timer = WORK_DUR;
+            timer = durations[WORK];
 
             if (forward) {
                 pomodoro_nr++;
@@ -183,23 +216,44 @@ class Timer {
     void skip_forward() { change_phase(true); }
 
     void skip_back() {
-        // prevent skipping back to nonpositive pomodoro numbers
-        if (!(pomodoro_nr == 1 && phase == WORK)) {
+        if ((ceil(timer) == durations[phase]) && !(pomodoro_nr == 1 && phase == WORK)) {
+            // less than 5 seconds have passed, skip back a phase
+            // also prevent skipping back to pomodoro numbers
             change_phase(false);
+        } else {
+            // more than 5 seconds have passed, skip to the beginning of this phase
+            is_paused_ = true;
+            pause_just_changed_ = true;
+            timer = durations[phase];
         }
     }
 
-    void playpause() { this->paused = !this->paused; }
+    void playpause() {
+        this->is_paused_ = !this->is_paused_;
+        this->pause_just_changed_ = true;
+    }
 
-    bool is_paused() { return this->paused; }
+    // reset to pomodoro #1
+    void reset() {
+        phase = WORK;
+        pomodoro_nr = 1;
 
-    bool phase_just_changed() { return this->phase_changed; }
+        timer = durations[WORK];
+        is_paused_ = true;
+        pause_just_changed_ = true;
+    }
+
+    bool is_paused() { return this->is_paused_; }
+
+    bool pause_just_changed() { return this->pause_just_changed_; }
+
+    bool phase_just_changed() { return this->phase_just_changed_; }
 
     bool time_ran_out() { return this->time_ran_out_; }
 
     void update() {
         float delta = GetFrameTime();
-        if (!paused) {
+        if (!is_paused_) {
             timer -= delta;
         }
 
@@ -207,7 +261,7 @@ class Timer {
             change_phase(true);
             time_ran_out_ = true;
         } else {
-            phase_changed = false;
+            phase_just_changed_ = false;
             time_ran_out_ = false;
         }
     }
@@ -336,7 +390,7 @@ int main() {
     // Raylib Initialization -----------------------------------------------------------
 
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, APP_NAME);
-    SetExitKey(KEY_NULL); // prevent ESC from closing the window
+    // SetExitKey(KEY_NULL); // prevent ESC from closing the window
 
     InitAudioDevice();
     Sound changeover_sound = LoadSound("explosion_good.wav");
@@ -362,6 +416,13 @@ int main() {
     Button *forward_btn = new Button(forward_rect, ACCENT, ">", 50, BG_COLOR, KEY_L);
     Button *backward_btn = new Button(backward_rect, ACCENT, "<", 50, BG_COLOR, KEY_H);
 
+    const float reset_btn_padding = 10;
+    const float reset_btn_width = 80;
+    Rectangle reset_rect = {SCREEN_WIDTH - reset_btn_padding - reset_btn_width, 50, reset_btn_width,
+                            30};
+    Color reset_btn_color = ColorBrightness(BG_COLOR, -0.2f);
+    Button *reset_btn = new Button(reset_rect, reset_btn_color, "reset", 20, FG_COLOR, KEY_R);
+
     Timer timer = Timer();
 
     // Main loop
@@ -370,25 +431,39 @@ int main() {
         //----------------------------------------------------------------------------------
 
         Button::update_buttons();
-        if (start_btn->is_pressed()) {
+        timer.update();
+
+        if (start_btn->just_pressed()) {
             timer.playpause();
-            start_btn->set_text((timer.is_paused()) ? "start" : "pause");
         }
 
-        if (forward_btn->is_pressed()) {
+        if (forward_btn->just_pressed()) {
             timer.skip_forward();
         }
-        if (backward_btn->is_pressed()) {
+        if (backward_btn->just_pressed()) {
             timer.skip_back();
         }
 
-        timer.update();
-
-        // different behavior is desirable for when the timer runs out on its own
-        // vs when the phase changes (which will happen whenever the phase is skipped)
-        if (timer.phase_just_changed()) {
+        if (reset_btn->just_pressed()) {
+            timer.reset();
         }
 
+        if (timer.phase_just_changed()) {
+            switch (phase) {
+            case WORK:
+                ACCENT = MAY_ORANGE;
+                break;
+            case SHORT_BREAK:
+            case LONG_BREAK:
+                ACCENT = MAY_MAGENTA;
+                break;
+            }
+            start_btn->set_body_color(ACCENT);
+            forward_btn->set_body_color(ACCENT);
+            backward_btn->set_body_color(ACCENT);
+        }
+
+        // only alert the user if the timer runs out on its own
         if (timer.time_ran_out()) {
             PlaySound(changeover_sound);
 
@@ -410,6 +485,11 @@ int main() {
             system(command.c_str());
         }
 
+        // above things will affect the value of pause_just_changed, so listen for this last
+        if (timer.pause_just_changed()) {
+            start_btn->set_text((timer.is_paused()) ? "start" : "pause");
+        }
+
         //----------------------------------------------------------------------------------
 
         // BEGIN DRAWING
@@ -417,10 +497,10 @@ int main() {
         BeginDrawing();
         ClearBackground(BG_COLOR);
 
+        draw_header();
+
         Button::draw_buttons();
         timer.draw();
-
-        draw_header(phase, pomodoro_nr);
 
         EndDrawing();
         // END DRAWING
@@ -442,7 +522,9 @@ int main() {
     //--------------------------------------------------------------------------------------
 }
 
-void draw_header(Phase phase, int pomodoro_nr) {
+// i don't feel this warrants a class of its own like Timer or Button since there isn't any internal
+// state stored by the header itself; all it does is just reference two global variables
+void draw_header() {
     string text = "pomodoro #" + to_string(pomodoro_nr) + " - ";
 
     switch (phase) {
